@@ -1,0 +1,11 @@
+DATASET:
+  path: "./Datasets/ModelNet40"
+  mode: "train"
+  n: 20000
+TRAINING:
+  k_neighbors: 15
+  calc_scores: "softmax"
+  hidden: [[16], [16], [16], [16]]
+  num_matrices: [8, 8, 8, 8]
+  dropout: 0.4
+  num_part: 50
