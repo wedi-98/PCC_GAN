@@ -1,7 +1,8 @@
 from torch.utils.data import DataLoader
 import yaml
-from utils.modelnet40_for_PAConv import ModelNet40ForPAConv
+
 from models.DGCNN_PAConv import PAConv
+from models.Hyperprior import Hyperprior
 import numpy as np
 import torch
 
@@ -23,4 +24,8 @@ model.train()
 data = np.random.random((4, 3, 8000))
 data = torch.from_numpy(data).float()
 y = model(data)
-print(y.shape)
+y = y.permute(0,2,1)
+hyper = Hyperprior(bottleneck_capacity=50)
+y = hyper(y, (50, 8000))
+
+print(y.size())

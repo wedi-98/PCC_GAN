@@ -6,7 +6,7 @@ from .. import src
 
 class AssignScoreWithK(Function):
     @staticmethod
-    def forward(ctx, scores, points, centers, knn_idx, aggregate) : # -> torch.Tensor:
+    def forward(ctx, scores, points, centers, knn_idx, aggregate):  # -> torch.Tensor:
         """
         :param ctx
         :param scores: (B, N, K, M)

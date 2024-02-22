@@ -6,8 +6,8 @@ Embed PAConv into DGCNN
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from util.PAConv_util import knn, get_graph_feature, get_scorenet_input, feat_trans_dgcnn, ScoreNet
-from cuda_lib.functional import assign_score_withk as assemble_dgcnn
+from utils.PAConv_util import knn, get_graph_feature, get_scorenet_input, feat_trans_dgcnn, ScoreNet
+from utils.cuda_lib.functional import assign_score_withk as assemble_dgcnn
 
 
 class PAConv(nn.Module):
@@ -62,12 +62,12 @@ class PAConv(nn.Module):
         self.conv1 = nn.Sequential(nn.Conv2d(6, 64, kernel_size=1, bias=True),
                                    nn.BatchNorm2d(64, momentum=0.1))
 
-        self.convt = nn.Sequential(nn.Conv1d(64*5, 1024, kernel_size=1, bias=False),
+        self.convt = nn.Sequential(nn.Conv1d(64 * 5, 1024, kernel_size=1, bias=False),
                                    self.bnt)
         self.convc = nn.Sequential(nn.Conv1d(16, 64, kernel_size=1, bias=False),
                                    self.bnc)
 
-        self.conv6 = nn.Sequential(nn.Conv1d(1088+64*5, 256, kernel_size=1, bias=False),
+        self.conv6 = nn.Sequential(nn.Conv1d(1088 + 64 * 5, 256, kernel_size=1, bias=False),
                                    self.bn6)
         self.dp1 = nn.Dropout(p=args.get('dropout', 0.4))
         self.conv7 = nn.Sequential(nn.Conv1d(256, 256, kernel_size=1, bias=False),

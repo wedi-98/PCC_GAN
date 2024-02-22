@@ -16,15 +16,17 @@ Compressed state is represented as a stack (head, tail)
 """
 
 import numpy as np
-import torch
 
 RANS_L = 1 << 31  # the lower bound of the normalisation interval
+
 
 def empty_message(shape):
     return (np.full(shape, RANS_L, "uint64"), ())
 
+
 def stack_extend(stack, arr):
     return arr, stack
+
 
 def stack_slice(stack, n):
     # Pop elements from message stack if
@@ -41,6 +43,7 @@ def stack_slice(stack, n):
             stack = arr[n:], stack
             break
     return stack, np.concatenate(slc)
+
 
 def push(x, starts, freqs, precisions):
     """
@@ -59,7 +62,7 @@ def push(x, starts, freqs, precisions):
     assert head.shape == starts.shape == freqs.shape, (
         f"Inconsistent encoder shapes! head: {head.shape} | "
         f"starts: {starts.shape} | freqs: {freqs.shape}")
-    
+
     # 32-bit Renormalization - restrict symbols to pre-images
     x_max = ((RANS_L >> precisions) << 32) * freqs
     idxs = head >= x_max
@@ -72,11 +75,13 @@ def push(x, starts, freqs, precisions):
     head_div_freqs, head_mod_freqs = np.divmod(head, freqs)
     return (head_div_freqs << np.uint(precisions)) + head_mod_freqs + starts, tail
 
+
 def pop(x, precisions):
     head_, tail_ = x
     head_ = np.uint64(head_)
     # Modulo as bitwise and
     interval_starts = head_ & np.uint((1 << precisions) - 1)
+
     def pop(starts, freqs):
         head = freqs * (head_ >> np.uint(precisions)) + interval_starts - starts
         idxs = head < RANS_L
@@ -92,8 +97,9 @@ def pop(x, precisions):
         else:
             tail = tail_
         return head, tail
-    
+
     return interval_starts, pop
+
 
 def flatten(x):
     """Flatten a vrans state x into a 1d numpy array."""
@@ -104,16 +110,19 @@ def flatten(x):
         out.append(head)
     return np.concatenate(out)
 
+
 def unflatten(arr, shape):
     """Unflatten a 1d numpy array into a vrans state."""
     size = np.prod(shape)
     head = np.uint64(arr[:size]) << 32 | np.uint64(arr[size:2 * size])
     return np.reshape(head, shape), (arr[2 * size:], ())
 
+
 def unflatten_scalar(arr):
     """Unflatten a 1d numpy array into a vrans state."""
     head = np.uint64(arr[0]) << np.uint64(32) | np.uint64(arr[1])
     return head, (arr[2:], ())
+
 
 def message_equal(message1, message2):
     return np.all(flatten(message1) == flatten(message2))

@@ -5,6 +5,7 @@ import numpy as np
 from collections import namedtuple
 from utils import maths
 from utils.compression import hyperprior_model, prior_model
+
 """
 Hyperprior as proposed in [1]. 
 
@@ -13,7 +14,6 @@ Hyperprior as proposed in [1].
     
 这篇论文提出的模型是在这里实现，总的计算定义在类Hyperprior或者HyperpriorDLMM中
 """
-
 
 MIN_SCALE = 0.11
 LOG_SCALES_MIN = -3.
@@ -29,25 +29,29 @@ HyperInfo = namedtuple(
 )
 
 CompressionOutput = namedtuple("CompressionOutput",
-   ["hyperlatents_encoded",
-    "latents_encoded",
-    "hyperlatent_spatial_shape",
-    "batch_shape",
-    "spatial_shape",
-    "hyper_coding_shape",
-    "latent_coding_shape",
-    "hyperlatent_bits",
-    "latent_bits",
-    "total_bits",
-    "hyperlatent_bpp",
-    "latent_bpp",
-    "total_bpp"]
-)
+                               ["hyperlatents_encoded",
+                                "latents_encoded",
+                                "hyperlatent_spatial_shape",
+                                "batch_shape",
+                                "spatial_shape",
+                                "hyper_coding_shape",
+                                "latent_coding_shape",
+                                "hyperlatent_bits",
+                                "latent_bits",
+                                "total_bits",
+                                "hyperlatent_bpp",
+                                "latent_bpp",
+                                "total_bpp"]
+                               )
 
-def get_num_mixtures(K_agg, C, params=['mu','scale','mix']):
+
+def get_num_mixtures(K_agg, C, params=['mu', 'scale', 'mix']):
+    print("get_num_mixtures")
     return K_agg // (len(params) * C)
 
+
 def unpack_likelihood_params(x, conv_out, log_scales_min):
+    print("unpack_likelihood_params")
     N, C, H, W = x.shape
     K_agg = conv_out.shape[1]
 
@@ -63,15 +67,19 @@ def unpack_likelihood_params(x, conv_out, log_scales_min):
 
     return x, (logit_pis, means, log_scales), K
 
-def get_num_DLMM_channels(C, K=4, params=['mu','scale','mix']):
+
+def get_num_DLMM_channels(C, K=4, params=['mu', 'scale', 'mix']):
     """
     C:  Channels of latent representation (L3C uses 5).
     K:  Number of mixture coefficients.
     """
+    print("get_num_DLMM_channels")
     return C * K * len(params)
+
 
 class HyperpriorAnalysis(nn.Module):
     def __init__(self, C=50, N=320, activation="relu"):
+        print("HyperpriorAnalysis.init")
         super(HyperpriorAnalysis, self).__init__()
         cnn_kwargs = dict(kernel_size=5, stride=2, padding=2, padding_mode="reflect")
         self.activation = getattr(F, activation)
@@ -82,6 +90,7 @@ class HyperpriorAnalysis(nn.Module):
         self.conv3 = nn.Conv1d(N, N, **cnn_kwargs)
 
     def forward(self, x):
+        print("HyperpriorAnalysis.forward")
         x = self.activation(self.conv1(x))
         x = self.activation(self.conv2(x))
         x = self.conv3(x)
@@ -92,7 +101,7 @@ class HyperpriorAnalysis(nn.Module):
 class HyperpriorSynthesis(nn.Module):
     def __init__(self, C=50, N=320, activation='relu', final_activation=None):
         super(HyperpriorSynthesis, self).__init__()
-
+        print("HyperpriorSynthesis.init")
         cnn_kwargs = dict(kernel_size=5, stride=2, padding=2, output_padding=1)
         self.activation = getattr(F, activation)
         self.final_activation = final_activation
@@ -105,6 +114,7 @@ class HyperpriorSynthesis(nn.Module):
             self.final_activation = getattr(F, final_activation)
 
     def forward(self, x):
+        print("HyperpriorSynthesis.forward")
         x = self.activation(self.conv1(x))
         x = self.activation(self.conv2(x))
         x = self.conv3(x)
@@ -121,9 +131,10 @@ class HyperpriorSynthesisDLMM(nn.Module):
 
     C:  Number of output channels 后面调一下
     """
+
     def __init__(self, C=64, N=320, activation='relu', final_activation=None):
         super(HyperpriorSynthesisDLMM, self).__init__()
-
+        print("HyperpriorSynthesisDLMM.init")
         cnn_kwargs = dict(kernel_size=5, stride=2, padding=2, output_padding=1)
         self.activation = getattr(F, activation)
         self.final_activation = final_activation
@@ -137,6 +148,7 @@ class HyperpriorSynthesisDLMM(nn.Module):
             self.final_activation = getattr(F, final_activation)
 
     def forward(self, x):
+        print("HyperpriorSynthesisDLMM.forward")
         x = self.activation(self.conv1(x))
         x = self.activation(self.conv2(x))
         x = self.conv3(x)
@@ -160,6 +172,7 @@ class CodingModel(nn.Module):
 
     def __init__(self, n_channels, min_likelihood=MIN_LIKELIHOOD, max_likelihood=MAX_LIKELIHOOD):
         super(CodingModel, self).__init__()
+        print("CodingModel.__init__")
         self.n_channels = n_channels
         self.min_likelihood = float(min_likelihood)
         self.max_likelihood = float(max_likelihood)
@@ -170,7 +183,7 @@ class CodingModel(nn.Module):
                     quantization through additive uniform noise channel.
                     Otherwise, perform actual quantization (through rounding).
         """
-
+        print("CodingModel._quantize")
         if mode == 'noise':
             quantization_noise = torch.nn.init.uniform_(torch.zeros_like(x), -0.5, 0.5)
             x = x + quantization_noise
@@ -188,7 +201,7 @@ class CodingModel(nn.Module):
         return x
 
     def _estimate_entropy(self, likelihood, spatial_shape):
-
+        print("CodingModel._estimate_entropy")
         EPS = 1e-9
         quotient = -np.log(2.)
         batch_size = likelihood.size()[0]
@@ -203,7 +216,7 @@ class CodingModel(nn.Module):
         return n_bits, bpp
 
     def _estimate_entropy_log(self, log_likelihood, spatial_shape):
-
+        print("CodingModel._estimate_entropy_log")
         quotient = -np.log(2.)
         batch_size = log_likelihood.size()[0]
 
@@ -219,7 +232,7 @@ class CodingModel(nn.Module):
         # Latents rounded instead of additive uniform noise
         # Ignore rounding in backward pass
         values = inputs
-
+        print("CodingModel.quantize_latents_st")
         if means is not None:
             values = values - means
 
@@ -232,7 +245,7 @@ class CodingModel(nn.Module):
         return values
 
     def latent_likelihood(self, x, mean, scale):
-
+        print("CodingModel.latent_likelihood")
         # Assumes 1 - CDF(x) = CDF(-x)
         x = x - mean
         x = torch.abs(x)
@@ -254,7 +267,7 @@ class Hyperprior(CodingModel):
     def __init__(self, bottleneck_capacity=220, hyperlatent_filters=LARGE_HYPERLATENT_FILTERS,
                  mode='large', likelihood_type='gaussian', scale_lower_bound=MIN_SCALE, entropy_code=False,
                  vectorize_encoding=True, block_encode=True):
-
+        print("Hyperprior.__init__")
         """
         Introduces probabilistic model over latents of
         latents.
@@ -304,7 +317,7 @@ class Hyperprior(CodingModel):
             self.block_encode = block_encode
 
     def compress_forward(self, latents, spatial_shape, **kwargs):
-
+        print("Hyperprior.compress_forward")
         # Obtain hyperlatents from hyperencoder
         hyperlatents = self.analysis_net(latents)
         hyperlatent_spatial_shape = hyperlatents.size()[2:]
@@ -364,7 +377,7 @@ class Hyperprior(CodingModel):
         return compression_output
 
     def decompress_forward(self, compression_output, device):
-
+        print("Hyperprior.decompress_forward")
         hyperlatents_encoded = compression_output.hyperlatents_encoded
         latents_encoded = compression_output.latents_encoded
         hyperlatent_spatial_shape = compression_output.hyperlatent_spatial_shape
@@ -396,7 +409,7 @@ class Hyperprior(CodingModel):
         return latents_decoded.to(device)
 
     def forward(self, latents, spatial_shape, **kwargs):
-
+        print("Hyperprior.forward")
         hyperlatents = self.analysis_net(latents)
 
         # Mismatch b/w continuous and discrete cases?
@@ -470,7 +483,7 @@ class HyperpriorDLMM(CodingModel):
         a non-parametric, fully factorized density.
         """
         super(HyperpriorDLMM, self).__init__(n_channels=bottleneck_capacity)
-
+        print("HyperpriorDLMM.__init__")
         assert bottleneck_capacity <= 128, 'Will probably run out of memory!'
         self.bottleneck_capacity = bottleneck_capacity
         self.scale_lower_bound = scale_lower_bound
@@ -499,7 +512,7 @@ class HyperpriorDLMM(CodingModel):
             raise ValueError('Unknown likelihood model: {}'.format(likelihood_type))
 
     def latent_log_likelihood_DLMM(self, x, DLMM_params):
-
+        print("HyperpriorDLMM.latent_log_likelihood_DLMM")
         # (B C K H W)
         x, (logit_pis, means, log_scales), K = unpack_likelihood_params(x, DLMM_params, LOG_SCALES_MIN)
 
@@ -521,7 +534,7 @@ class HyperpriorDLMM(CodingModel):
         return log_DLMM
 
     def forward(self, latents, spatial_shape, **kwargs):
-
+        print("HyperpriorDLMM.forward")
         hyperlatents = self.analysis_net(latents)
 
         # Mismatch b/w continuous and discrete cases?

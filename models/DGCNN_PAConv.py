@@ -61,7 +61,7 @@ class PAConv(nn.Module):
         self.conv1 = nn.Sequential(nn.Conv2d(6, 64, kernel_size=1, bias=True),
                                    nn.BatchNorm2d(64, momentum=0.1))
 
-        self.convt = nn.Sequential(nn.Conv1d(64*5, 1024, kernel_size=1, bias=False),
+        self.convt = nn.Sequential(nn.Conv1d(64 * 5, 1024, kernel_size=1, bias=False),
                                    self.bnt)
         self.convc = nn.Sequential(nn.Conv1d(16, 64, kernel_size=1, bias=False),
                                    self.bnc)
@@ -117,8 +117,9 @@ class PAConv(nn.Module):
         xx = torch.cat((x1, x2, x3, x4, x5), dim=1)
 
         xc = F.relu(self.convt(xx))
+        print("之前  ", xc.size())
         xc = F.adaptive_max_pool1d(xc, 1).view(B, -1)
-
+        print("之后  ", xc.size())
         # cls_label = cls_label.view(B, 16, 1)
         # cls_label = F.relu(self.convc(cls_label))
         # cls = torch.cat((xc.view(B, 1024, 1), cls_label), dim=1)

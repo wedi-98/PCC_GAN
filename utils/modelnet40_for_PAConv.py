@@ -5,19 +5,19 @@ from torch.utils.data import Dataset
 
 class ModelNet40ForPAConv(Dataset):
     def __init__(self, args):
-        self.path = args["path"]       # 数据集路径, 该路径下需要包含一个txt文件ModelNet.txt(自己创建)，文件中一行代表包含的一类数据
-        self.n = args["n"]             # 保留点的数量
-        self.mode = args["mode"]       # 训练模式还是测试模式
+        self.path = args["path"]  # 数据集路径, 该路径下需要包含一个txt文件ModelNet.txt(自己创建)，文件中一行代表包含的一类数据
+        self.n = args["n"]  # 保留点的数量
+        self.mode = args["mode"]  # 训练模式还是测试模式
         self.txt = os.path.join(self.path, "ModelNet40.txt")
-        self.cl_list = []           # 类别列表，对应的文件夹列表
-        self.files = []             # 所有文件列表
+        self.cl_list = []  # 类别列表，对应的文件夹列表
+        self.files = []  # 所有文件列表
         with open(self.txt, "r") as f:
             for line in f:
                 line = line.replace("\n", "")
                 self.cl_list.append(line)
         for cl in self.cl_list:
             files = os.path.join(self.path, cl, "train")
-            with open(os.path.join(files, cl+".txt")) as f:
+            with open(os.path.join(files, cl + ".txt")) as f:
                 for line in f:
                     line = line.replace("\n", "")
                     file = os.path.join(files, line)

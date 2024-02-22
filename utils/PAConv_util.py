@@ -5,7 +5,7 @@ import torch.nn.functional as F
 
 # 这里代码有问题，PAConv抄的DGCNN的，DGCNN两个版本都有问题，和论文里说的狗屁对不上
 def knn(x, k):
-    inner = -2 * torch.matmul( x.transpose(2, 1), x)
+    inner = -2 * torch.matmul(x.transpose(2, 1), x)
 
     xx = torch.sum(x ** 2, dim=1, keepdim=True)
     pairwise_distance = -xx - inner - xx.transpose(2, 1)
@@ -84,7 +84,8 @@ def feat_trans_dgcnn(point_input, kernel, m):
     # following get_graph_feature in DGCNN: torch.cat((neighbor - center, neighbor), dim=3)
     B, _, N = point_input.size()  # b, 2cin, n
     point_output = torch.matmul(point_input.permute(0, 2, 1).repeat(1, 1, 2), kernel).view(B, N, m, -1)  # b,n,m,cout
-    center_output = torch.matmul(point_input.permute(0, 2, 1), kernel[:point_input.size(1)]).view(B, N, m, -1)  # b,n,m,cout
+    center_output = torch.matmul(point_input.permute(0, 2, 1), kernel[:point_input.size(1)]).view(B, N, m,
+                                                                                                  -1)  # b,n,m,cout
     return point_output, center_output
 
 
@@ -103,12 +104,14 @@ class ScoreNet(nn.Module):
                 self.mlp_bns_nohidden = nn.BatchNorm2d(out_channel)
 
         else:
-            self.mlp_convs_hidden.append(nn.Conv2d(in_channel, hidden_unit[0], 1, bias=False))  # from in_channel to first hidden
+            self.mlp_convs_hidden.append(
+                nn.Conv2d(in_channel, hidden_unit[0], 1, bias=False))  # from in_channel to first hidden
             self.mlp_bns_hidden.append(nn.BatchNorm2d(hidden_unit[0]))
             for i in range(1, len(hidden_unit)):  # from 2nd hidden to next hidden to last hidden
                 self.mlp_convs_hidden.append(nn.Conv2d(hidden_unit[i - 1], hidden_unit[i], 1, bias=False))
                 self.mlp_bns_hidden.append(nn.BatchNorm2d(hidden_unit[i]))
-            self.mlp_convs_hidden.append(nn.Conv2d(hidden_unit[-1], out_channel, 1, bias=not last_bn))  # from last hidden to out_channel
+            self.mlp_convs_hidden.append(
+                nn.Conv2d(hidden_unit[-1], out_channel, 1, bias=not last_bn))  # from last hidden to out_channel
             self.mlp_bns_hidden.append(nn.BatchNorm2d(out_channel))
 
     def forward(self, xyz, calc_scores='softmax', bias=0):
@@ -123,7 +126,7 @@ class ScoreNet(nn.Module):
 
         else:
             for i, conv in enumerate(self.mlp_convs_hidden):
-                if i == len(self.mlp_convs_hidden)-1:  # if the output layer, no ReLU
+                if i == len(self.mlp_convs_hidden) - 1:  # if the output layer, no ReLU
                     if self.last_bn:
                         bn = self.mlp_bns_hidden[i]
                         scores = bn(conv(scores))
@@ -134,9 +137,9 @@ class ScoreNet(nn.Module):
                     scores = F.relu(bn(conv(scores)))
 
         if calc_scores == 'softmax':
-            scores = F.softmax(scores, dim=1)+bias  # B*m*N*K
+            scores = F.softmax(scores, dim=1) + bias  # B*m*N*K
         elif calc_scores == 'sigmoid':
-            scores = torch.sigmoid(scores)+bias  # B*m*N*K
+            scores = torch.sigmoid(scores) + bias  # B*m*N*K
         else:
             raise ValueError('Not Implemented!')
 

@@ -2,6 +2,7 @@ import torch
 import numpy as np
 import scipy.stats
 
+
 def pmf_to_quantized_cdf(pmf, precision, careful=True):
     """
     Based on https://github.com/rygorous/ryg_rans/blob/master/main64.cpp
@@ -67,8 +68,8 @@ def pmf_to_quantized_cdf(pmf, precision, careful=True):
     assert cdf[-1] == 1 << precision, 'Error in CDF normalization'
 
     if careful is True:
-        for i in range(cdf.size(0)-1):
-            assert cdf[i+1] >= cdf[i], 'CDF function is not monotonic!'
+        for i in range(cdf.size(0) - 1):
+            assert cdf[i + 1] >= cdf[i], 'CDF function is not monotonic!'
 
     return cdf
 
@@ -88,6 +89,7 @@ class LowerBoundToward(torch.autograd.Function):
     """
     Assumes output shape is identical to input shape.
     """
+
     @staticmethod
     def forward(ctx, tensor, lower_bound):
         # lower_bound:  Scalar float.
@@ -99,26 +101,33 @@ class LowerBoundToward(torch.autograd.Function):
         gate = torch.logical_or(ctx.mask, grad_output.lt(0.)).type(grad_output.dtype)
         return grad_output * gate, None
 
+
 def standardized_CDF_gaussian(value):
     # Gaussian
     # return 0.5 * (1. + torch.erf(value/ np.sqrt(2)))
-    return 0.5 * torch.erfc(value * (-1./np.sqrt(2)))
+    return 0.5 * torch.erfc(value * (-1. / np.sqrt(2)))
+
 
 def standardized_CDF_logistic(value):
     # Logistic
     return torch.sigmoid(value)
 
+
 def standardized_quantile_gaussian(quantile):
     return scipy.stats.norm.ppf(quantile)
+
 
 def standardized_quantile_logistic(quantile):
     return scipy.stats.logistic.ppf(quantile)
 
+
 def quantile_gaussian(quantile, mean, scale):
     return scipy.stats.norm.ppf(quantile, loc=mean, scale=scale)
 
+
 def quantile_logistic(quantile, mean, scale):
     return scipy.stats.logistic.ppf(quantile, loc=mean, scale=scale)
+
 
 def gaussian_entropy(D, logvar):
     """
@@ -131,6 +140,7 @@ def gaussian_entropy(D, logvar):
             logvar for each example in batch, [batch_size, D]
     """
     h = 0.5 * (D * (np.log(2.0 * np.pi) + 1) + torch.sum(logvar, dim=1))
+
 
 def log_density_gaussian(x, mu=None, logvar=None):
     """
@@ -150,13 +160,14 @@ def log_density_gaussian(x, mu=None, logvar=None):
     if mu is None and logvar is None:
         mu = torch.zeros_like(x)
         logvar = torch.zeros_like(x)
-        
+
     normalization = -0.5 * (np.log(2 * np.pi) + logvar)
     # Logvar should be above exp(-5)
-    inv_var = torch.exp(torch.min(-logvar, torch.ones_like(logvar)*5))
-    log_density = normalization - 0.5 * ((x - mu)**2 * inv_var)
+    inv_var = torch.exp(torch.min(-logvar, torch.ones_like(logvar) * 5))
+    log_density = normalization - 0.5 * ((x - mu) ** 2 * inv_var)
 
     return log_density
+
 
 def gaussian_sample(mu, logvar):
     """
@@ -176,7 +187,7 @@ def gaussian_sample(mu, logvar):
     sigma = torch.exp(0.5 * logvar)
     epsilon = torch.randn_like(sigma)
     return mu + sigma * epsilon
-        
+
 
 def kl_divergence_q_prior_normal(mu, logvar):
     """
@@ -187,7 +198,7 @@ def kl_divergence_q_prior_normal(mu, logvar):
     diagonal covariance. Then:
     $ D_{KL}(q_{\phi(z|x)}||p(z)) = -1/2 * \sum_j (1 + log \sigma_j^2 - \mu_j^2 - \sigma_j^2) $
     """
-    
+
     assert mu.shape == logvar.shape, 'Mean and log-variance must share shape (batch, latent_dim)'
     latent_kl = 0.5 * (-1 - logvar + mu.pow(2) + logvar.exp()).sum(dim=1)
     return latent_kl
@@ -218,4 +229,3 @@ def matrix_log_density_gaussian(x, mu, logvar):
     logvar = logvar.view(1, batch_size, dim)
 
     return log_density_gaussian(x, mu, logvar)
-

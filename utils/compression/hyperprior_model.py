@@ -5,9 +5,9 @@ import numpy as np
 from tqdm import tqdm
 
 # Custom
-from src.helpers import maths, utils
-from src.compression import entropy_models, entropy_coding
-from src.compression import compression_utils
+from utils import maths, utils
+from utils.compression import entropy_models
+from utils.compression import compression_utils
 
 MIN_SCALE = entropy_models.MIN_SCALE
 MIN_LIKELIHOOD = entropy_models.MIN_LIKELIHOOD
@@ -19,7 +19,6 @@ lower_bound_toward = maths.LowerBoundToward.apply
 
 
 class HyperpriorEntropyModel(entropy_models.ContinuousEntropyModel):
-
     """
     Routines for compression/decompression using hyperprior entropy model.
 
@@ -30,17 +29,17 @@ class HyperpriorEntropyModel(entropy_models.ContinuousEntropyModel):
     """
 
     def __init__(self, distribution, likelihood_bound=MIN_LIKELIHOOD, tail_mass=TAIL_MASS,
-        precision=PRECISION_P):
-
-        super().__init__(distribution=distribution, likelihood_bound=likelihood_bound, 
-            tail_mass=tail_mass, precision=precision)
-
+                 precision=PRECISION_P):
+        print("HyperpriorEntropyModel.__init__")
+        super().__init__(distribution=distribution, likelihood_bound=likelihood_bound,
+                         tail_mass=tail_mass, precision=precision)
 
     def compute_medians(self):
-        self.medians = self.distribution.median().view(1,-1,1,1).cpu()
+        print("HyperpriorEntropyModel.compute_medians")
+        self.medians = self.distribution.median().view(1, -1, 1, 1).cpu()
 
     def build_tables(self, **kwargs):
-        
+        print("HyperpriorEntropyModel.build_tables")
         offsets = 0.
 
         lower_tail = self.distribution.lower_tail(self.tail_mass).cpu()
@@ -69,7 +68,7 @@ class HyperpriorEntropyModel(entropy_models.ContinuousEntropyModel):
 
         # Broadcast to [n_channels,1,*] format
         device = utils.get_device()
-        samples = samples.view(1,-1) + pmf_start.view(-1,1,1)
+        samples = samples.view(1, -1) + pmf_start.view(-1, 1, 1)
         pmf = self.distribution.likelihood(samples.to(device), collapsed_format=True).cpu()
 
         # [n_channels, max_length]
@@ -80,7 +79,7 @@ class HyperpriorEntropyModel(entropy_models.ContinuousEntropyModel):
 
         cdf_length = cdf_length.to(torch.int32)
         cdf_offset = cdf_offset.to(torch.int32)
-        
+
         # CDF shape [n_channels, max_length + 2] - account for fenceposts + overflow
         CDF = torch.zeros((len(pmf_length), max_length + 2), dtype=torch.int32)
         for n, (pmf_, pmf_length_) in enumerate(zip(tqdm(pmf), pmf_length)):
@@ -104,7 +103,6 @@ class HyperpriorEntropyModel(entropy_models.ContinuousEntropyModel):
         self.register_parameter('CDF_offset', self.CDF_offset)
         self.register_parameter('CDF_length', self.CDF_length)
 
-
     def _estimate_compression_bits(self, x, spatial_shape):
         """
         Estimate number of bits needed to compress `x`
@@ -114,7 +112,7 @@ class HyperpriorEntropyModel(entropy_models.ContinuousEntropyModel):
             x:              Bottleneck tensor to be compressed, [N,C,H,W]
             spatial_shape:  Spatial dimensions of original image
         """
-
+        print("HyperpriorEntropyModel._estimate_compression_bits")
         EPS = 1e-9
         quotient = -np.log(2.)
 
@@ -133,6 +131,7 @@ class HyperpriorEntropyModel(entropy_models.ContinuousEntropyModel):
         return n_bits, bpp, bpi
 
     def compute_indices(self, broadcast_shape):
+        print("HyperpriorEntropyModel.compute_indices")
         index_size = self.distribution.n_channels
         indices = torch.arange(index_size, dtype=torch.int32).view(-1, 1, 1)
         indices = indices.repeat(1, *broadcast_shape)
@@ -155,6 +154,7 @@ class HyperpriorEntropyModel(entropy_models.ContinuousEntropyModel):
         encoded:        Tensor of the same shape as `bottleneck` containing the 
                         compressed message.
         """
+        print("HyperpriorEntropyModel.compress")
         input_shape = tuple(bottleneck.size())
         batch_shape = input_shape[0]
         coding_shape = input_shape[1:]
@@ -179,7 +179,7 @@ class HyperpriorEntropyModel(entropy_models.ContinuousEntropyModel):
         cdf = self.CDF.cpu().numpy().astype('uint32')
         cdf_length = self.CDF_length.cpu().numpy()
         cdf_offset = self.CDF_offset.cpu().numpy()
-        
+
         """
         For each value in `data`, the corresponding value in `index` determines which
         probability model in `cdf` is used to encode it.
@@ -192,14 +192,14 @@ class HyperpriorEntropyModel(entropy_models.ContinuousEntropyModel):
         """
 
         encoded, coding_shape = compression_utils.ans_compress(symbols, indices, cdf, cdf_length, cdf_offset,
-            coding_shape, precision=self.precision, vectorize=vectorize, 
-            block_encode=block_encode)
+                                                               coding_shape, precision=self.precision,
+                                                               vectorize=vectorize,
+                                                               block_encode=block_encode)
 
         return encoded, coding_shape, rounded
 
-    
-    def decompress(self, encoded, batch_shape, broadcast_shape, coding_shape, vectorize=False, 
-        block_decode=True):
+    def decompress(self, encoded, batch_shape, broadcast_shape, coding_shape, vectorize=False,
+                   block_decode=True):
         """
         Decompress bitstrings to floating-point tensors.
 
@@ -216,10 +216,10 @@ class HyperpriorEntropyModel(entropy_models.ContinuousEntropyModel):
         Returns:
         decoded:            Tensor of same shape as input to `compress()`.
         """
-
+        print("HyperpriorEntropyModel.decompress")
         n_channels = self.distribution.n_channels
         # same as `input_shape` to `compress()`
-        symbols_shape =  (batch_shape, n_channels, *broadcast_shape)
+        symbols_shape = (batch_shape, n_channels, *broadcast_shape)
 
         indices = self.compute_indices(broadcast_shape)
 
@@ -239,7 +239,8 @@ class HyperpriorEntropyModel(entropy_models.ContinuousEntropyModel):
         cdf_offset = self.CDF_offset.cpu().numpy()
 
         decoded = compression_utils.ans_decompress(encoded, indices, cdf, cdf_length, cdf_offset,
-            coding_shape, precision=self.precision, vectorize=vectorize, block_decode=block_decode)
+                                                   coding_shape, precision=self.precision, vectorize=vectorize,
+                                                   block_decode=block_decode)
 
         symbols = torch.Tensor(decoded)
         symbols = torch.reshape(symbols, symbols_shape)
@@ -264,8 +265,8 @@ class HyperpriorDensity(nn.Module):
         arXiv:1802.01436 (2018).
     """
 
-    def __init__(self, n_channels, init_scale=10., filters=(3, 3, 3), min_likelihood=MIN_LIKELIHOOD, 
-        max_likelihood=MAX_LIKELIHOOD, **kwargs):
+    def __init__(self, n_channels, init_scale=10., filters=(3, 3, 3), min_likelihood=MIN_LIKELIHOOD,
+                 max_likelihood=MAX_LIKELIHOOD, **kwargs):
         """
         init_scale: Scaling factor determining the initial width of the
                     probability densities.
@@ -273,7 +274,7 @@ class HyperpriorDensity(nn.Module):
                     of the density model. Default K=4 layers.
         """
         super(HyperpriorDensity, self).__init__(**kwargs)
-        
+        print("HyperpriorDensity.__init__")
         self.init_scale = float(init_scale)
         self.filters = tuple(int(f) for f in filters)
         self.min_likelihood = float(min_likelihood)
@@ -285,20 +286,19 @@ class HyperpriorDensity(nn.Module):
         scale = self.init_scale ** (1 / (len(self.filters) + 1))
 
         # Define univariate density model 
-        for k in range(len(self.filters)+1):
-            
+        for k in range(len(self.filters) + 1):
             # Weights
             H_init = np.log(np.expm1(1 / scale / filters[k + 1]))
-            H_k = nn.Parameter(torch.ones((n_channels, filters[k+1], filters[k])))  # apply softmax for non-negativity
+            H_k = nn.Parameter(torch.ones((n_channels, filters[k + 1], filters[k])))  # apply softmax for non-negativity
             torch.nn.init.constant_(H_k, H_init)
             self.register_parameter('H_{}'.format(k), H_k)
 
             # Scale factors
-            a_k = nn.Parameter(torch.zeros((n_channels, filters[k+1], 1)))
+            a_k = nn.Parameter(torch.zeros((n_channels, filters[k + 1], 1)))
             self.register_parameter('a_{}'.format(k), a_k)
 
             # Biases
-            b_k = nn.Parameter(torch.zeros((n_channels, filters[k+1], 1)))
+            b_k = nn.Parameter(torch.zeros((n_channels, filters[k + 1], 1)))
             torch.nn.init.uniform_(b_k, -0.5, 0.5)
             self.register_parameter('b_{}'.format(k), b_k)
 
@@ -311,8 +311,8 @@ class HyperpriorDensity(nn.Module):
             torch.Tensor - shape `(C, 1, *)`.
         """
         logits = x
-
-        for k in range(len(self.filters)+1):
+        print("HyperpriorDensity.cdf_logits")
+        for k in range(len(self.filters) + 1):
             H_k = getattr(self, 'H_{}'.format(str(k)))  # Weight
             a_k = getattr(self, 'a_{}'.format(str(k)))  # Scale
             b_k = getattr(self, 'b_{}'.format(str(k)))  # Bias
@@ -326,24 +326,28 @@ class HyperpriorDensity(nn.Module):
         return logits
 
     def quantization_offset(self, **kwargs):
+        print("HyperpriorDensity.quantization_offset")
         return 0.
 
     def lower_tail(self, tail_mass):
+        print("HyperpriorDensity.lower_tail")
         cdf_logits_func = lambda x: self.cdf_logits(x, update_parameters=False)
-        lt = compression_utils.estimate_tails(cdf_logits_func, target=-np.log(2. / tail_mass - 1.), 
-            shape=torch.Size((self.n_channels,1,1))).detach()
+        lt = compression_utils.estimate_tails(cdf_logits_func, target=-np.log(2. / tail_mass - 1.),
+                                              shape=torch.Size((self.n_channels, 1, 1))).detach()
         return lt.reshape(self.n_channels)
 
     def upper_tail(self, tail_mass):
+        print("HyperpriorDensity.upper_tail")
         cdf_logits_func = lambda x: self.cdf_logits(x, update_parameters=False)
-        ut = compression_utils.estimate_tails(cdf_logits_func, target=np.log(2. / tail_mass - 1.), 
-            shape=torch.Size((self.n_channels,1,1))).detach()
+        ut = compression_utils.estimate_tails(cdf_logits_func, target=np.log(2. / tail_mass - 1.),
+                                              shape=torch.Size((self.n_channels, 1, 1))).detach()
         return ut.reshape(self.n_channels)
 
     def median(self):
+        print("HyperpriorDensity.median")
         cdf_logits_func = lambda x: self.cdf_logits(x, update_parameters=False)
-        _median = compression_utils.estimate_tails(cdf_logits_func, target=0., 
-            shape=torch.Size((self.n_channels,1,1))).detach()
+        _median = compression_utils.estimate_tails(cdf_logits_func, target=0.,
+                                                   shape=torch.Size((self.n_channels, 1, 1))).detach()
         return _median.reshape(self.n_channels)
 
     def likelihood(self, x, collapsed_format=False, **kwargs):
@@ -351,14 +355,15 @@ class HyperpriorDensity(nn.Module):
         Expected input: (N,C,H,W)
         """
         latents = x
-
+        print("HyperpriorDensity.likelihood")
         # Converts latents to (C,1,*) format
 
         if collapsed_format is False:
-            N, C, H, W = latents.size()
-            latents = latents.permute(1,0,2,3)
+            # N, C, H, W = latents.size()   没用到
+            # latents = latents.permute(1, 0, 2, 3)
+            latents = latents.permute(1, 0, 2)
             shape = latents.shape
-            latents = torch.reshape(latents, (shape[0],1,-1))
+            latents = torch.reshape(latents, (shape[0], 1, -1))
 
         cdf_upper = self.cdf_logits(latents + 0.5)
         cdf_lower = self.cdf_logits(latents - 0.5)
@@ -379,53 +384,55 @@ class HyperpriorDensity(nn.Module):
 
         # Reshape to (N,C,H,W)
         likelihood_ = torch.reshape(likelihood_, shape)
-        likelihood_ = likelihood_.permute(1,0,2,3)
+        # likelihood_ = likelihood_.permute(1, 0, 2, 3)
+        likelihood_ = likelihood_.permute(1, 0, 2)
 
         return likelihood_
 
     def forward(self, x, **kwargs):
+        print("HyperpriorDensity.forward")
         return self.likelihood(x)
 
 
-if __name__ == '__main__':
-
-    import time
-
-    n_channels = 64
-    use_blocks = True
-    vectorize = True
-    hyperprior_density = HyperpriorDensity(n_channels)
-    hyperprior_entropy_model = HyperpriorEntropyModel(hyperprior_density)
-    hyperprior_entropy_model.build_tables()
-
-    loc, scale = 2.401, 3.43
-    n_data = 1
-    toy_shape = (n_data, n_channels, 117, 185)
-    bottleneck = torch.randn(toy_shape)
-
-    bits, bpp, bpi = hyperprior_entropy_model._estimate_compression_bits(bottleneck, 
-        spatial_shape=toy_shape[2:])
-
-    start_t = time.time()
-    encoded, coding_shape, symbols = hyperprior_entropy_model.compress(bottleneck,
-        block_encode=use_blocks, vectorize=vectorize)
-
-    if (use_blocks is True) or (vectorize is True): 
-        enc_shape = encoded.shape[0]
-    else:
-        enc_shape = sum([len(enc) for enc in encoded])
-
-    print('Encoded shape', enc_shape)
-
-    decoded, decoded_raw = hyperprior_entropy_model.decompress(encoded, n_data,
-        broadcast_shape=toy_shape[2:], coding_shape=coding_shape, block_decode=use_blocks,
-        vectorize=vectorize)
-
-    print('Decoded shape', decoded.shape)
-    delta_t = time.time() - start_t
-    print(f'Delta t {delta_t:.2f} s | ', torch.mean((decoded_raw == symbols).float()).item())
-
-
-    cbits = enc_shape * 32
-    print(f'Symbols compressed to {cbits:.1f} bits.')
-    print(f'Estimated entropy {bits:.3f} bits.')
+# if __name__ == '__main__':
+#
+#     import time
+#
+#     n_channels = 64
+#     use_blocks = True
+#     vectorize = True
+#     hyperprior_density = HyperpriorDensity(n_channels)
+#     hyperprior_entropy_model = HyperpriorEntropyModel(hyperprior_density)
+#     hyperprior_entropy_model.build_tables()
+#
+#     loc, scale = 2.401, 3.43
+#     n_data = 1
+#     toy_shape = (n_data, n_channels, 117, 185)
+#     bottleneck = torch.randn(toy_shape)
+#
+#     bits, bpp, bpi = hyperprior_entropy_model._estimate_compression_bits(bottleneck,
+#                                                                          spatial_shape=toy_shape[2:])
+#
+#     start_t = time.time()
+#     encoded, coding_shape, symbols = hyperprior_entropy_model.compress(bottleneck,
+#                                                                        block_encode=use_blocks, vectorize=vectorize)
+#
+#     if (use_blocks is True) or (vectorize is True):
+#         enc_shape = encoded.shape[0]
+#     else:
+#         enc_shape = sum([len(enc) for enc in encoded])
+#
+#     print('Encoded shape', enc_shape)
+#
+#     decoded, decoded_raw = hyperprior_entropy_model.decompress(encoded, n_data,
+#                                                                broadcast_shape=toy_shape[2:], coding_shape=coding_shape,
+#                                                                block_decode=use_blocks,
+#                                                                vectorize=vectorize)
+#
+#     print('Decoded shape', decoded.shape)
+#     delta_t = time.time() - start_t
+#     print(f'Delta t {delta_t:.2f} s | ', torch.mean((decoded_raw == symbols).float()).item())
+#
+#     cbits = enc_shape * 32
+#     print(f'Symbols compressed to {cbits:.1f} bits.')
+#     print(f'Estimated entropy {bits:.3f} bits.')

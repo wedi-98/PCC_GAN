@@ -7,7 +7,7 @@ Craystack ANS implementation: https://github.com/j-towns/craystack/blob/master/c
 
 OVERFLOW_WIDTH = 4
 OVERFLOW_CODE = 1 << (1 << OVERFLOW_WIDTH)
-PATCH_SIZE = (1,1)
+PATCH_SIZE = (1, 1)
 
 import torch
 import numpy as np
@@ -16,23 +16,27 @@ from warnings import warn
 from collections import namedtuple
 
 # Custom
-from src.helpers import maths, utils
-from src.compression import ans as vrans
-from src.compression import compression_utils
+from utils import utils
+from utils.compression import ans as vrans
+from utils.compression import compression_utils
 
 Codec = namedtuple('Codec', ['push', 'pop'])
 cast2u64 = lambda x: np.array(x, dtype=np.uint64)
 
+
 def base_codec(enc_statfun, dec_statfun, precision, log=False):
+    print("base_codec")
     if np.any(precision >= 24):
         warn('Detected precision over 28. Codecs lose accuracy at high '
              'precision.')
 
     def push(message, symbol):
+        print("push")
         start, freq = enc_statfun(symbol)
         return vrans.push(message, start, freq, precision)
 
     def pop(message, log=log):
+        print("pop")
         cf, pop_fun = vrans.pop(message, precision)
         symbol = dec_statfun(cf)
         start, freq = enc_statfun(symbol)
@@ -41,31 +45,39 @@ def base_codec(enc_statfun, dec_statfun, precision, log=False):
 
     return Codec(push, pop)
 
+
 def _indexed_cdf_to_enc_statfun(cdf_i):
+    print("_indexed_cdf_to_enc_statfun")
     # enc_statfun: symbol |-> start, freq
     def _enc_statfun(value):
+        print("_enc_statfun")
         # Value in [0, max_length]
         lower = cdf_i[value]
         # cum_freq, pmf @ value
         return lower, cdf_i[int(value + np.uint64(1))] - lower
-            
+
     return _enc_statfun
 
+
 def _vec_indexed_cdf_to_enc_statfun(cdf_i):
+    print("_vec_indexed_cdf_to_enc_statfun")
     # enc_statfun: symbol |-> start, freq
     def _enc_statfun(value):
+        print("_enc_statfun")
         # (coding_shape) = (C,H,W) by default but canbe generalized
         # cdf_i: [(coding_shape), pmf_length + 2]
         # value: [(coding_shape)]
-        lower = np.take_along_axis(cdf_i, 
-            np.expand_dims(value, -1), axis=-1)[..., 0]
-        upper = np.take_along_axis(cdf_i, 
-            np.expand_dims(value + 1, -1), axis=-1)[..., 0]
+        lower = np.take_along_axis(cdf_i,
+                                   np.expand_dims(value, -1), axis=-1)[..., 0]
+        upper = np.take_along_axis(cdf_i,
+                                   np.expand_dims(value + 1, -1), axis=-1)[..., 0]
         return lower, upper - lower
 
     return _enc_statfun
 
+
 def _indexed_cdf_to_dec_statfun(cdf_i, cdf_i_length):
+    print("_indexed_cdf_to_dec_statfun")
     # dec_statfun: cf |-> symbol
     cdf_i = cdf_i[:cdf_i_length]
     term = cdf_i[-1]
@@ -74,39 +86,43 @@ def _indexed_cdf_to_dec_statfun(cdf_i, cdf_i_length):
     )
 
     def _dec_statfun(cum_freq):
+        print("_dec_statfun")
         # Search such that CDF[s] <= cum_freq < CDF[s+1]
         sym = np.searchsorted(cdf_i, cum_freq, side='right') - 1
         return sym
 
     return _dec_statfun
 
+
 def _vec_indexed_cdf_to_dec_statfun(cdf_i, cdf_i_length):
+    print("_vec_indexed_cdf_to_dec_statfun")
     # dec_statfun: cf |-> symbol
     *coding_shape, max_cdf_length = cdf_i.shape
     coding_shape = tuple(coding_shape)
     cdf_i_flat = np.reshape(cdf_i, (-1, max_cdf_length))
 
-    cdf_i_flat_ragged = [c[:l] for (c,l) in zip(cdf_i_flat, 
-        cdf_i_length.flatten())]
+    cdf_i_flat_ragged = [c[:l] for (c, l) in zip(cdf_i_flat,
+                                                 cdf_i_length.flatten())]
 
     def _dec_statfun(value):
+        print("_dec_statfun")
         # (coding_shape) = (C,H,W) by default but can be generalized
         # cdf_i: [(coding_shape), pmf_length + 2]
         # value: [(coding_shape)]
         assert value.shape == coding_shape, (
             f"CDF-value shape mismatch! {value.shape} v. {coding_shape}")
         sym_flat = np.array(
-            [np.searchsorted(cb, v_i, 'right') - 1 for (cb, v_i) in 
-                zip(cdf_i_flat_ragged, value.flatten())])
+            [np.searchsorted(cb, v_i, 'right') - 1 for (cb, v_i) in
+             zip(cdf_i_flat_ragged, value.flatten())])
 
         sym = np.reshape(sym_flat, coding_shape)
         return sym  # (coding_shape)
 
     return _dec_statfun
 
-def ans_index_buffered_encoder(symbols, indices, cdf, cdf_length, cdf_offset, precision, 
-    overflow_width=OVERFLOW_WIDTH, **kwargs):
 
+def ans_index_buffered_encoder(symbols, indices, cdf, cdf_length, cdf_offset, precision,
+                               overflow_width=OVERFLOW_WIDTH, **kwargs):
     """
     Based on "https://github.com/tensorflow/compression/blob/master/tensorflow_compression/cc/
     kernels/unbounded_index_range_coding_kernels.cc"
@@ -156,7 +172,7 @@ def ans_index_buffered_encoder(symbols, indices, cdf, cdf_length, cdf_offset, pr
     symbols <-> indices
     cdf <-> cdf_offset <-> cdf_length
     """
-
+    print("ans_index_buffered_encoder")
     instructions = []
 
     coding_shape = symbols.shape[1:]
@@ -169,9 +185,9 @@ def ans_index_buffered_encoder(symbols, indices, cdf, cdf_length, cdf_offset, pr
 
     enc_statfun_overflow = _indexed_cdf_to_enc_statfun(overflow_cdf)
     dec_statfun_overflow = _indexed_cdf_to_dec_statfun(overflow_cdf,
-        len(overflow_cdf))
+                                                       len(overflow_cdf))
     overflow_push, overflow_pop = base_codec(enc_statfun_overflow,
-        dec_statfun_overflow, overflow_width)
+                                             dec_statfun_overflow, overflow_width)
 
     # LIFO - last item in buffer is first item decompressed
     for i in range(len(indices)):  # loop over flattened axis
@@ -227,7 +243,7 @@ def ans_index_buffered_encoder(symbols, indices, cdf, cdf_length, cdf_offset, pr
                 start, freq = enc_statfun_overflow(cast2u64(max_overflow))
                 instructions.append((start, freq, True))
                 val -= max_overflow
-            
+
             start, freq = enc_statfun_overflow(cast2u64(val))
             instructions.append((start, freq, True))
 
@@ -238,13 +254,14 @@ def ans_index_buffered_encoder(symbols, indices, cdf, cdf_length, cdf_offset, pr
 
     return instructions, coding_shape
 
-def ans_index_encoder_flush(instructions, precision, overflow_width=OVERFLOW_WIDTH, **kwargs):
 
+def ans_index_encoder_flush(instructions, precision, overflow_width=OVERFLOW_WIDTH, **kwargs):
+    print("ans_index_encoder_flush")
     message = vrans.empty_message(())
 
     # LIFO - last item compressed is first item decompressed
     for i in reversed(range(len(instructions))):
-        
+
         start, freq, flag = instructions[i]
 
         if flag is False:
@@ -257,26 +274,28 @@ def ans_index_encoder_flush(instructions, precision, overflow_width=OVERFLOW_WID
     print('Symbol compressed to {:.3f} bits.'.format(32 * message_length))
     return encoded
 
-def ans_index_encoder(symbols, indices, cdf, cdf_length, cdf_offset, precision, 
-    overflow_width=OVERFLOW_WIDTH, **kwargs):
 
+def ans_index_encoder(symbols, indices, cdf, cdf_length, cdf_offset, precision,
+                      overflow_width=OVERFLOW_WIDTH, **kwargs):
+    print("ans_index_encoder")
     instructions, coding_shape = ans_index_buffered_encoder(symbols, indices, cdf,
-        cdf_length, cdf_offset, precision, overflow_width)
+                                                            cdf_length, cdf_offset, precision, overflow_width)
 
     encoded = ans_index_encoder_flush(instructions, precision, overflow_width)
 
     return encoded, coding_shape
 
 
-def vec_ans_index_buffered_encoder(symbols, indices, cdf, cdf_length, cdf_offset, precision, 
-    coding_shape, overflow_width=OVERFLOW_WIDTH, **kwargs):
+def vec_ans_index_buffered_encoder(symbols, indices, cdf, cdf_length, cdf_offset, precision,
+                                   coding_shape, overflow_width=OVERFLOW_WIDTH, **kwargs):
+    print("vec_ans_index_buffered_encoder")
     """
     Vectorized version of `ans_index_encoder`. Incurs constant bit overhead, 
     but is faster.
 
     ANS-encodes unbounded integer data using an indexed probability table.
     """
-    
+
     instructions = []
 
     symbols_shape = symbols.shape
@@ -291,9 +310,9 @@ def vec_ans_index_buffered_encoder(symbols, indices, cdf, cdf_length, cdf_offset
 
     enc_statfun_overflow = _vec_indexed_cdf_to_enc_statfun(overflow_cdf)
     dec_statfun_overflow = _vec_indexed_cdf_to_dec_statfun(overflow_cdf,
-        np.ones_like(overflow_cdf) * len(overflow_cdf))
+                                                           np.ones_like(overflow_cdf) * len(overflow_cdf))
     overflow_push, overflow_pop = base_codec(enc_statfun_overflow,
-        dec_statfun_overflow, overflow_width)
+                                             dec_statfun_overflow, overflow_width)
 
     assert bool(np.all(cdf_index >= 0)) and bool(np.all(cdf_index < cdf.shape[0])), (
         "Invalid index.")
@@ -324,28 +343,27 @@ def vec_ans_index_buffered_encoder(symbols, indices, cdf, cdf_length, cdf_offset
         # Vectorize on patches - there's probably a way to interlace patches with
         # batch elements for B > 1 ...
         if ((symbols_shape[2] % PATCH_SIZE[0] == 0) and (symbols_shape[3] % PATCH_SIZE[1] == 0)) is False:
-            values = utils.pad_factor(torch.Tensor(values), symbols_shape[2:], 
-                factor=PATCH_SIZE).cpu().numpy().astype(np.int32)
-            indices = utils.pad_factor(torch.Tensor(indices), symbols_shape[2:], 
-                factor=PATCH_SIZE).cpu().numpy().astype(np.int32)
-            overflow = utils.pad_factor(torch.Tensor(overflow), symbols_shape[2:], 
-                factor=PATCH_SIZE).cpu().numpy().astype(np.int32)
+            values = utils.pad_factor(torch.Tensor(values), symbols_shape[2:],
+                                      factor=PATCH_SIZE).cpu().numpy().astype(np.int32)
+            indices = utils.pad_factor(torch.Tensor(indices), symbols_shape[2:],
+                                       factor=PATCH_SIZE).cpu().numpy().astype(np.int32)
+            overflow = utils.pad_factor(torch.Tensor(overflow), symbols_shape[2:],
+                                        factor=PATCH_SIZE).cpu().numpy().astype(np.int32)
 
         assert (values.shape[2] % PATCH_SIZE[0] == 0) and (values.shape[3] % PATCH_SIZE[1] == 0)
         assert (indices.shape[2] % PATCH_SIZE[0] == 0) and (indices.shape[3] % PATCH_SIZE[1] == 0)
-  
+
         values, _ = compression_utils.decompose(values, n_channels)
         overflow, _ = compression_utils.decompose(overflow, n_channels)
         cdf_index, unfolded_shape = compression_utils.decompose(indices, n_channels)
         coding_shape = values.shape[1:]
         assert coding_shape == cdf_index.shape[1:]
 
-
     # LIFO - last item in buffer is first item decompressed
     for i in range(len(cdf_index)):  # loop over batch dimension
         # Bin of discrete CDF that value belongs to
         value_i = values[i]
-        cdf_index_i = cdf_index[i]        
+        cdf_index_i = cdf_index[i]
         cdf_i = cdf[cdf_index_i]
         cdf_length_i = cdf_length[cdf_index_i]
         max_value_i = cdf_length_i - 2
@@ -373,7 +391,7 @@ def vec_ans_index_buffered_encoder(symbols, indices, cdf, cdf_length, cdf_offset
             cond_mask = (overflow_i >> (widths * overflow_width)) != 0
 
             while np.any(cond_mask):
-                widths = np.where(cond_mask, widths+1, widths)
+                widths = np.where(cond_mask, widths + 1, widths)
                 cond_mask = (overflow_i >> (widths * overflow_width)) != 0
 
             val = widths
@@ -386,7 +404,7 @@ def vec_ans_index_buffered_encoder(symbols, indices, cdf, cdf_length, cdf_offset
                 freq = overflow_start[of_mask]
                 instructions.append((start, freq, True, int(overflow_width), of_mask))
                 # val[cond_mask] -= max_overflow
-                val = np.where(cond_mask, val-max_overflow, val)
+                val = np.where(cond_mask, val - max_overflow, val)
                 cond_mask = val >= max_overflow
 
             val_push = cast2u64(val)
@@ -405,7 +423,7 @@ def vec_ans_index_buffered_encoder(symbols, indices, cdf, cdf_length, cdf_offset
                 start = overflow_start[of_mask]
                 freq = overflow_freq[of_mask]
                 instructions.append((start, freq, True, int(overflow_width), of_mask))
-                widths = np.where(cond_mask, widths-1, widths)
+                widths = np.where(cond_mask, widths - 1, widths)
                 cond_mask = widths != 0
                 counter += 1
 
@@ -413,7 +431,9 @@ def vec_ans_index_buffered_encoder(symbols, indices, cdf, cdf_length, cdf_offset
 
 
 def overflow_view(value, mask):
+    print("overflow_view")
     return value[mask]
+
 
 def substack(codec, view_fun):
     """
@@ -422,7 +442,9 @@ def substack(codec, view_fun):
     view_fun = lambda head: head[0]
     to run the codec on only the first element of the head
     """
+    print("substack")
     def push(message, start, freq, precision, mask):
+        print("push")
         head, tail = message
         view_fun_ = lambda x: view_fun(x, mask)
         subhead, update = compression_utils.view_update(head, view_fun_)
@@ -430,6 +452,7 @@ def substack(codec, view_fun):
         return update(subhead), tail
 
     def pop(message, precision, mask, *args, **kwargs):
+        print("pop")
         head, tail = message
         view_fun_ = lambda x: view_fun(x, mask)
         subhead, update = compression_utils.view_update(head, view_fun_)
@@ -437,7 +460,7 @@ def substack(codec, view_fun):
         cf, pop_fun = vrans.pop((subhead, tail), precision)
         symbol = cf
         start, freq = symbol, 1
-        
+
         assert np.all(start <= cf) and np.all(cf < start + freq)
         (subhead, tail), data = pop_fun(start, freq), symbol
         updated_head = update(subhead)
@@ -445,13 +468,14 @@ def substack(codec, view_fun):
 
     return Codec(push, pop)
 
-def vec_ans_index_encoder_flush(instructions, precision, coding_shape, overflow_width=OVERFLOW_WIDTH, **kwargs):
 
+def vec_ans_index_encoder_flush(instructions, precision, coding_shape, overflow_width=OVERFLOW_WIDTH, **kwargs):
+    print("vec_ans_index_encoder_flush")
     message = vrans.empty_message(coding_shape)
     overflow_push, _ = substack(codec=None, view_fun=overflow_view)
     # LIFO - last item compressed is first item decompressed
     for i in reversed(range(len(instructions))):
-        
+
         start, freq, flag, precision_i, mask = instructions[i]
 
         if flag is False:
@@ -466,19 +490,20 @@ def vec_ans_index_encoder_flush(instructions, precision, coding_shape, overflow_
     print('Symbol compressed to {:.3f} bits.'.format(32 * message_length))
     return encoded
 
-def vec_ans_index_encoder(symbols, indices, cdf, cdf_length, cdf_offset, precision, 
-    coding_shape, overflow_width=OVERFLOW_WIDTH, **kwargs):
 
+def vec_ans_index_encoder(symbols, indices, cdf, cdf_length, cdf_offset, precision,
+                          coding_shape, overflow_width=OVERFLOW_WIDTH, **kwargs):
     instructions, coding_shape = vec_ans_index_buffered_encoder(symbols, indices, cdf,
-        cdf_length, cdf_offset, precision, coding_shape, overflow_width)
-
+                                                                cdf_length, cdf_offset, precision, coding_shape,
+                                                                overflow_width)
+    print("vec_ans_index_encoder")
     encoded = vec_ans_index_encoder_flush(instructions, precision, coding_shape, overflow_width)
 
     return encoded, coding_shape
 
-def ans_index_decoder(encoded, indices, cdf, cdf_length, cdf_offset, precision,
-    coding_shape, overflow_width=OVERFLOW_WIDTH, **kwargs):
 
+def ans_index_decoder(encoded, indices, cdf, cdf_length, cdf_offset, precision,
+                      coding_shape, overflow_width=OVERFLOW_WIDTH, **kwargs):
     """
     Reverse op of `ans_index_encoder`. Decodes ans-encoded bitstring `encoded` into 
     a decoded message tensor `decoded.
@@ -487,7 +512,7 @@ def ans_index_decoder(encoded, indices, cdf, cdf_length, cdf_offset, precision,
     identical to the inputs to the encoding function used to generate the encoded 
     tensor.
     """
-
+    print("ans_index_decoder")
     message = vrans.unflatten_scalar(encoded)  # (head, tail)
     decoded = np.empty(indices.shape).flatten()
     indices = indices.astype(np.int32).flatten()
@@ -498,9 +523,9 @@ def ans_index_decoder(encoded, indices, cdf, cdf_length, cdf_offset, precision,
 
     enc_statfun_overflow = _indexed_cdf_to_enc_statfun(overflow_cdf)
     dec_statfun_overflow = _indexed_cdf_to_dec_statfun(overflow_cdf,
-        len(overflow_cdf))
+                                                       len(overflow_cdf))
     overflow_push, overflow_pop = base_codec(enc_statfun_overflow,
-        dec_statfun_overflow, overflow_width)
+                                             dec_statfun_overflow, overflow_width)
 
     for i in range(len(indices)):
 
@@ -537,7 +562,7 @@ def ans_index_decoder(encoded, indices, cdf, cdf_length, cdf_offset, precision,
                 message, val = overflow_pop(message)
                 val = int(val)
                 widths += val
-            
+
             overflow = 0
             for j in range(widths):
                 message, val = overflow_pop(message)
@@ -551,23 +576,22 @@ def ans_index_decoder(encoded, indices, cdf, cdf_length, cdf_offset, precision,
                 value = -value - 1
             else:
                 value += max_value
-        
+
         symbol = value + cdf_offset[cdf_index]
         decoded[i] = symbol
 
     return decoded
 
 
-def vec_ans_index_decoder(encoded, indices, cdf, cdf_length, cdf_offset, precision, 
-    coding_shape, overflow_width=OVERFLOW_WIDTH, **kwargs):
-
+def vec_ans_index_decoder(encoded, indices, cdf, cdf_length, cdf_offset, precision,
+                          coding_shape, overflow_width=OVERFLOW_WIDTH, **kwargs):
     """
     Reverse op of `vec_ans_index_encoder`. Decodes ans-encoded bitstring into a decoded 
     message tensor.
     Arguments (`indices`, `cdf`, `cdf_length`, `cdf_offset`, `precision`) must be 
     identical to the inputs to `vec_ans_index_encoder` used to generate the encoded tensor.
     """
-
+    print("vec_ans_index_decoder")
     original_shape = indices.shape
     B, n_channels, *_ = original_shape
     message = vrans.unflatten(encoded, coding_shape)
@@ -580,9 +604,9 @@ def vec_ans_index_decoder(encoded, indices, cdf, cdf_length, cdf_offset, precisi
 
     enc_statfun_overflow = _vec_indexed_cdf_to_enc_statfun(overflow_cdf)
     dec_statfun_overflow = _vec_indexed_cdf_to_dec_statfun(overflow_cdf,
-        np.ones_like(overflow_cdf) * len(overflow_cdf))
+                                                           np.ones_like(overflow_cdf) * len(overflow_cdf))
     overflow_codec = base_codec(enc_statfun_overflow,
-        dec_statfun_overflow, overflow_width)
+                                dec_statfun_overflow, overflow_width)
 
     assert bool(np.all(cdf_index >= 0)) and bool(np.all(cdf_index < cdf.shape[0])), (
         "Invalid index.")
@@ -597,13 +621,12 @@ def vec_ans_index_decoder(encoded, indices, cdf, cdf_length, cdf_offset, precisi
         # batch elements for B > 1 ...
 
         if ((original_shape[2] % PATCH_SIZE[0] == 0) and (original_shape[3] % PATCH_SIZE[1] == 0)) is False:
-            indices = utils.pad_factor(torch.Tensor(indices), original_shape[2:], 
-                factor=PATCH_SIZE).cpu().numpy().astype(np.int32)
+            indices = utils.pad_factor(torch.Tensor(indices), original_shape[2:],
+                                       factor=PATCH_SIZE).cpu().numpy().astype(np.int32)
         padded_shape = indices.shape
         assert (indices.shape[2] % PATCH_SIZE[0] == 0) and (indices.shape[3] % PATCH_SIZE[1] == 0)
         cdf_index, unfolded_shape = compression_utils.decompose(indices, n_channels)
         coding_shape = cdf_index.shape[1:]
-
 
     symbols = []
     _, overflow_pop = substack(codec=overflow_codec, view_fun=overflow_view)
@@ -623,7 +646,7 @@ def vec_ans_index_decoder(encoded, indices, cdf, cdf_length, cdf_offset, precisi
         of_mask = value == max_value_i
 
         if np.any(of_mask):
-            
+
             message, val = overflow_pop(message, overflow_width, of_mask)
             val = cast2u64(val)
             widths = val
@@ -637,7 +660,7 @@ def vec_ans_index_decoder(encoded, indices, cdf, cdf_length, cdf_offset, precisi
 
             overflow = np.zeros_like(val)
             cond_mask = widths != 0
-            
+
             while np.any(cond_mask):
                 counter = 0
                 message, val = overflow_pop(message, overflow_width, of_mask)
@@ -646,7 +669,7 @@ def vec_ans_index_decoder(encoded, indices, cdf, cdf_length, cdf_offset, precisi
 
                 op = overflow | (val << (counter * overflow_width))
                 overflow = np.where(cond_mask, op, overflow)
-                widths = np.where(cond_mask, widths-1, widths)
+                widths = np.where(cond_mask, widths - 1, widths)
                 cond_mask = widths != 0
                 counter += 1
 
@@ -662,7 +685,6 @@ def vec_ans_index_decoder(encoded, indices, cdf, cdf_length, cdf_offset, precisi
         symbol = value + cdf_offset[cdf_index_i]
         symbols.append(symbol)
 
-        
     if B == 1:
         decoded = compression_utils.reconstitute(np.stack(symbols, axis=0), padded_shape, unfolded_shape)
 
@@ -672,5 +694,7 @@ def vec_ans_index_decoder(encoded, indices, cdf, cdf_length, cdf_offset, precisi
         decoded = np.stack(symbols, axis=0)
     return decoded
 
+
 def ans_encode_decode_test(symbols, decompressed_symbols):
+    print("ans_encode_decode_test")
     return np.testing.assert_almost_equal(symbols, decompressed_symbols)

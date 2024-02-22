@@ -10,5 +10,3 @@ if torch.cuda.is_available():
         os.path.join(gpu_path, 'operator.cpp'),
         os.path.join(gpu_path, 'assign_score_withk_gpu.cu'),
     ], build_directory=gpu_path, verbose=False)
-
-

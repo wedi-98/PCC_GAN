@@ -5,9 +5,9 @@ import numpy as np
 from tqdm import tqdm
 
 # Custom
-from src.helpers import maths
-from src.compression import entropy_models, entropy_coding
-from src.compression import compression_utils
+from utils import maths
+from utils.compression import entropy_models
+from utils.compression import compression_utils
 
 lower_bound_toward = maths.LowerBoundToward.apply
 
@@ -21,13 +21,14 @@ SCALES_MIN = 0.11
 SCALES_MAX = 256
 SCALES_LEVELS = 64
 
+
 def prior_scale_table(scales_min=SCALES_MIN, scales_max=SCALES_MAX, levels=SCALES_LEVELS):
+    print("prior_scale_table")
     scale_table = np.exp(np.linspace(np.log(scales_min), np.log(scales_max), levels))
     return torch.Tensor(scale_table)
 
 
 class PriorEntropyModel(entropy_models.ContinuousEntropyModel):
-
     """
     Routines for compression/decompression using prior entropy model.
 
@@ -40,8 +41,7 @@ class PriorEntropyModel(entropy_models.ContinuousEntropyModel):
     """
 
     def __init__(self, distribution, scale_table=None, index_ranges=64, min_scale=MIN_SCALE,
-        likelihood_bound=MIN_LIKELIHOOD, tail_mass=TAIL_MASS, precision=PRECISION_P):
-
+                 likelihood_bound=MIN_LIKELIHOOD, tail_mass=TAIL_MASS, precision=PRECISION_P):
         """
         `scale_table`: Iterable of positive floats. For range coding, the scale
         parameters in `scale` can't be used, because the probability tables need
@@ -50,7 +50,7 @@ class PriorEntropyModel(entropy_models.ContinuousEntropyModel):
         greater entry in the table is selected. It's optimal to choose the
         scales provided here in a logarithmic way.
         """
-
+        print("PriorEntropyModel.init")
         self.scale_table = scale_table
         self.index_ranges = int(index_ranges)
         self.min_scale = min_scale
@@ -59,23 +59,22 @@ class PriorEntropyModel(entropy_models.ContinuousEntropyModel):
             self.scale_table = prior_scale_table()
 
         self.scale_table = lower_bound_toward(self.scale_table, self.min_scale)
-        self.indices = torch.arange(self.index_ranges)   
+        self.indices = torch.arange(self.index_ranges)
 
         self.standardized_CDF = distribution.standardized_CDF
         self.standardized_quantile = distribution.standardized_quantile
         self.quantile = distribution.quantile
 
-        super().__init__(distribution=distribution, likelihood_bound=likelihood_bound, 
-            tail_mass=tail_mass, precision=precision)
+        super().__init__(distribution=distribution, likelihood_bound=likelihood_bound,
+                         tail_mass=tail_mass, precision=precision)
 
         self.build_tables()
         scale_table_tensor = torch.Tensor(tuple(float(s) for s in self.scale_table))
         self.register_buffer('scale_table_tensor', scale_table_tensor)
         self.register_buffer('min_scale_tensor', torch.Tensor([float(self.min_scale)]))
 
-
     def build_tables(self, **kwargs):
-
+        print("PriorEntropyModel.build_tables")
         multiplier = -self.standardized_quantile(self.tail_mass / 2)
         pmf_center = torch.ceil(self.scale_table * multiplier).to(torch.int32)
         pmf_length = 2 * pmf_center + 1  # [n_scales]
@@ -97,9 +96,9 @@ class PriorEntropyModel(entropy_models.ContinuousEntropyModel):
 
         # CDF shape [n_scales,  max_length + 2] - account for fenceposts + overflow
         CDF = torch.zeros((len(pmf_length), max_length + 2), dtype=torch.int32)
-        for n, (pmf_, pmf_length_, tail_) in enumerate((zip(tqdm(pmf), pmf_length, tail_mass))): 
+        for n, (pmf_, pmf_length_, tail_) in enumerate((zip(tqdm(pmf), pmf_length, tail_mass))):
             pmf_ = pmf_[:pmf_length_]  # [max_length]
-            overflow = torch.clamp(1. - torch.sum(pmf_, dim=0, keepdim=True), min=0.)  
+            overflow = torch.clamp(1. - torch.sum(pmf_, dim=0, keepdim=True), min=0.)
             # pmf_ = torch.cat((pmf_, overflow), dim=0)
             pmf_ = torch.cat((pmf_, tail_), dim=0)
 
@@ -128,7 +127,7 @@ class PriorEntropyModel(entropy_models.ContinuousEntropyModel):
             x:              Bottleneck tensor to be compressed, [N,C,H,W]
             spatial_shape:  Spatial dimensions of original image
         """
-
+        print("PriorEntropyModel._estimate_compression_bits")
         EPS = 1e-9
         quotient = -np.log(2.)
         quantized = self.quantize_st(x, offsets=means)
@@ -146,16 +145,18 @@ class PriorEntropyModel(entropy_models.ContinuousEntropyModel):
         return n_bits, bpp, bpi
 
     def compute_indices(self, scales):
+        print("PriorEntropyModel.compute_indices")
         # Compute the indexes into the table for each of the passed-in scales.
         scales = lower_bound_toward(scales, SCALES_MIN)
         indices = torch.ones_like(scales, dtype=torch.int32) * (len(self.scale_table) - 1)
 
         for s in self.scale_table[:-1]:
-            indices = indices - (scales <= s).to(torch.int32) 
+            indices = indices - (scales <= s).to(torch.int32)
 
-        return indices      
+        return indices
 
     def compress(self, bottleneck, means, scales, vectorize=False, block_encode=True):
+        print("PriorEntropyModel.compress")
         """
         Compresses floating-point tensors to bitsrings.
 
@@ -194,14 +195,14 @@ class PriorEntropyModel(entropy_models.ContinuousEntropyModel):
         cdf_offset = self.CDF_offset.cpu().numpy()
 
         encoded, coding_shape = compression_utils.ans_compress(symbols, indices, cdf, cdf_length, cdf_offset,
-            coding_shape, precision=self.precision, vectorize=vectorize, 
-            block_encode=block_encode)
+                                                               coding_shape, precision=self.precision,
+                                                               vectorize=vectorize,
+                                                               block_encode=block_encode)
 
         return encoded, coding_shape, rounded
 
-    
-    def decompress(self, encoded, means, scales, broadcast_shape, coding_shape, vectorize=False, 
-        block_decode=True):
+    def decompress(self, encoded, means, scales, broadcast_shape, coding_shape, vectorize=False,
+                   block_decode=True):
         """
         Decompress bitstrings to floating-point tensors.
 
@@ -217,7 +218,7 @@ class PriorEntropyModel(entropy_models.ContinuousEntropyModel):
         Returns:
         decoded:            Tensor of same shape as input to `compress()`.
         """
-
+        print("PriorEntropyModel.decompress")
         batch_shape = scales.shape[0]
         n_channels = self.distribution.n_channels
         # same as `input_shape` to `compress()`
@@ -238,7 +239,8 @@ class PriorEntropyModel(entropy_models.ContinuousEntropyModel):
         cdf_offset = self.CDF_offset.cpu().numpy()
 
         decoded = compression_utils.ans_decompress(encoded, indices, cdf, cdf_length, cdf_offset,
-            coding_shape, precision=self.precision, vectorize=vectorize, block_decode=block_decode)
+                                                   coding_shape, precision=self.precision, vectorize=vectorize,
+                                                   block_decode=block_decode)
 
         symbols = torch.Tensor(decoded)
         symbols = torch.reshape(symbols, symbols_shape)
@@ -246,7 +248,6 @@ class PriorEntropyModel(entropy_models.ContinuousEntropyModel):
         decoded = self.dequantize(symbols, offsets=means)
 
         return decoded, decoded_raw
-
 
 
 class PriorDensity(nn.Module):
@@ -260,9 +261,9 @@ class PriorDensity(nn.Module):
     """
 
     def __init__(self, n_channels, min_likelihood=MIN_LIKELIHOOD, max_likelihood=MAX_LIKELIHOOD,
-        scale_lower_bound=MIN_SCALE, likelihood_type='gaussian', **kwargs):
+                 scale_lower_bound=MIN_SCALE, likelihood_type='gaussian', **kwargs):
         super(PriorDensity, self).__init__()
-
+        print("PriorDensity.__init__")
         self.n_channels = n_channels
         self.min_likelihood = float(min_likelihood)
         self.max_likelihood = float(max_likelihood)
@@ -285,20 +286,23 @@ class PriorDensity(nn.Module):
         x_quantized = torch.round(x - offset) + offset
         Where `offset` is gradient-less
         """
+        print("PriorDensity.quantization_offset")
         return mean.detach()
 
     def lower_tail(self, tail_mass, mean, scale):
+        print("PriorDensity.lower_tail")
         tail_mass = float(tail_mass)
         lt = self.quantile(0.5 * tail_mass, mean=mean, scale=scale)
         return lt
 
     def upper_tail(self, tail_mass, mean, scale):
+        print("PriorDensity.upper_tail")
         tail_mass = float(tail_mass)
         ut = self.quantile(1. - 0.5 * tail_mass, mean=mean, scale=scale)
         return ut
 
     def likelihood(self, x, mean, scale, **kwargs):
-
+        print("PriorDensity.likelihood")
         # Assumes 1 - CDF(x) = CDF(-x)
         x = x - mean
         x = torch.abs(x)
@@ -311,9 +315,10 @@ class PriorDensity(nn.Module):
         return likelihood_
 
     def forward(self, x, mean, scale, **kwargs):
+        print("PriorDensity.forward")
         return self.likelihood(x, mean, scale)
 
-    
+
 if __name__ == '__main__':
 
     import time
@@ -331,24 +336,25 @@ if __name__ == '__main__':
     scales = torch.randn(toy_shape) * np.sqrt(scale) + loc
     scales = torch.clamp(scales, min=MIN_SCALE)
 
-    bits, bpp, bpi = prior_entropy_model._estimate_compression_bits(bottleneck, means, 
-        scales, spatial_shape=toy_shape[2:])
+    bits, bpp, bpi = prior_entropy_model._estimate_compression_bits(bottleneck, means,
+                                                                    scales, spatial_shape=toy_shape[2:])
 
     start_t = time.time()
 
     encoded, coding_shape, rounded = prior_entropy_model.compress(bottleneck, means, scales,
-        block_encode=use_blocks, vectorize=vectorize)
-    
-    if (use_blocks is True) or (vectorize is True): 
+                                                                  block_encode=use_blocks, vectorize=vectorize)
+
+    if (use_blocks is True) or (vectorize is True):
         enc_shape = encoded.shape[0]
     else:
         enc_shape = sum([len(enc) for enc in encoded])
 
     print('Encoded shape', enc_shape)
 
-    decoded, decoded_raw = prior_entropy_model.decompress(encoded, means, scales, 
-        broadcast_shape=toy_shape[2:], coding_shape=coding_shape, block_decode=use_blocks,
-        vectorize=vectorize)
+    decoded, decoded_raw = prior_entropy_model.decompress(encoded, means, scales,
+                                                          broadcast_shape=toy_shape[2:], coding_shape=coding_shape,
+                                                          block_decode=use_blocks,
+                                                          vectorize=vectorize)
 
     print('Decoded shape', decoded.shape)
     delta_t = time.time() - start_t
