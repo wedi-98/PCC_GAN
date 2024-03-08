@@ -59,7 +59,7 @@ class PAConv(nn.Module):
         self.bn7 = nn.BatchNorm1d(256, momentum=0.1)
         self.bn8 = nn.BatchNorm1d(128, momentum=0.1)
 
-        self.conv1 = nn.Sequential(nn.Conv2d(6, 64, kernel_size=1, bias=True),
+        self.conv1 = nn.Sequential(nn.Conv1d(6, 64, kernel_size=1, bias=True),
                                    nn.BatchNorm2d(64, momentum=0.1))
 
         self.convt = nn.Sequential(nn.Conv1d(64 * 5, 1024, kernel_size=1, bias=False),

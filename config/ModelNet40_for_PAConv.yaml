@@ -2,7 +2,7 @@ DATASET:
   path: "./Datasets/ModelNet40"
   mode: "train"
   n: 20000
-TRAINING:
+MODEL:
   k_neighbors: 15
   calc_scores: "softmax"
   hidden: [[16], [16], [16], [16]]

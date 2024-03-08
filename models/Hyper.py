@@ -142,7 +142,7 @@ class HyperpriorSynthesisDLMM(nn.Module):
         self.conv1 = nn.ConvTranspose1d(N, N, **cnn_kwargs)
         self.conv2 = nn.ConvTranspose1d(N, N, **cnn_kwargs)
         self.conv3 = nn.ConvTranspose1d(N, C, kernel_size=3, stride=1, padding=1)
-        self.conv_out = nn.Conv2d(C, get_num_DLMM_channels(C), kernel_size=1, stride=1)
+        self.conv_out = nn.Conv1d(C, get_num_DLMM_channels(C), kernel_size=1, stride=1)
 
         if self.final_activation is not None:
             self.final_activation = getattr(F, final_activation)

@@ -1,31 +1,24 @@
-from torch.utils.data import DataLoader
 import yaml
 
-from models.DGCNN_PAConv import PAConv
-from models.Hyperprior import Hyperprior
 import numpy as np
 import torch
-
+import torch.nn as nn
+from models.DGCNN_PAConv import PAConv
+from models.Diffusion import *
 with open('./config/ModelNet40_for_PAConv.yaml', 'r') as f:
     cfg = yaml.safe_load(f)
+print("cfg type,  ", type(cfg))
 
-# data = ModelNet40ForPAConv(cfg.get("DATASET"))
-# dataset = DataLoader(data, batch_size=1)
-model = PAConv(cfg.get("TRAINING"))
-model.train()
-# for i, data in enumerate(dataset):
-#     data = np.array(data, dtype=np.float64)
-#     print(data.shape)
-#     data = torch.tensor(data, dtype=torch.float64)
-#     y = model(data)
-#     print(y.shape)
-#     if i == 0:
-#         break
-data = np.random.random((4, 3, 8000))
+data = np.random.random((16, 3, 8000))
 data = torch.from_numpy(data).float()
-y = model(data)
-y = y.permute(0,2,1)
-hyper = Hyperprior(bottleneck_capacity=50)
-y = hyper(y, (50, 8000))
 
-print(y.size())
+model = PAConv(cfg.get("MODEL"))
+y = model(data)
+
+net = PointWiseNet(50, True)
+var_sche = VarianceSchedule(100, 1e-4, 0.02)
+diffusion = DiffusionPoint(net, var_sche)
+
+out = diffusion(data.permute(0, 2, 1), y, 50)
+
+print(type(out))

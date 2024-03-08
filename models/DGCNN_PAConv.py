@@ -68,13 +68,13 @@ class PAConv(nn.Module):
 
         # self.conv6 = nn.Sequential(nn.Conv1d(1088+64*5, 256, kernel_size=1, bias=False),
         #                            self.bn6)
-        self.conv6 = nn.Sequential(nn.Conv1d(320, 256, kernel_size=1, bias=False),
+        self.conv6 = nn.Sequential(nn.Conv1d(320, 256, kernel_size=3, bias=False, stride=2, padding_mode='replicate'),
                                    self.bn6)
         self.dp1 = nn.Dropout(p=args.get('dropout', 0.4))
-        self.conv7 = nn.Sequential(nn.Conv1d(256, 256, kernel_size=1, bias=False),
+        self.conv7 = nn.Sequential(nn.Conv1d(256, 256, kernel_size=3, bias=False, stride=2, padding_mode='replicate'),
                                    self.bn7)
         self.dp2 = nn.Dropout(p=args.get('dropout', 0.4))
-        self.conv8 = nn.Sequential(nn.Conv1d(256, 128, kernel_size=1, bias=False),
+        self.conv8 = nn.Sequential(nn.Conv1d(256, 128, kernel_size=3, bias=False, stride=2, padding_mode='replicate'),
                                    self.bn8)
         self.conv9 = nn.Conv1d(128, self.num_part, kernel_size=1, bias=True)
 
